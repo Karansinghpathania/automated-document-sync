@@ -24,43 +24,46 @@ provider.
 ## Component diagram
 
 ```mermaid
-flowchart TD
-  subgraph GH[GitHub]
-    PR[pull_request event]
-    CODEOWNERS[CODEOWNERS + Reviews]
-    BRANCH_PROT[Branch Protection]
+flowchart TB
+  subgraph GITHUB[GitHub Platform]
+    PR[Pull Request / Events]
+    CHECKS[Checks / Reviews]
+    CODEOWNERS[CODEOWNERS]
+    BRPROT[Branch Protection]
   end
 
-  subgraph ACTION[GitHub Action (Orchestrator)]
+  subgraph ACTIONS[GitHub Actions]
+    ORCH[Orchestrator]
     CD[Change Detector]
     IA[Impact Analyzer]
     RED[Redaction Service]
-    GEN[Doc Generator (AI connector)]
+    GEN[Doc Generator]
     VAL[Validators]
-    DEDUPE[Dedup/Idempotency]
+    DEDUPE[Deduplication / Idempotency]
     COMMIT[Committer]
     ART[Artifact Manager]
     LOG[Lightweight Logging]
   end
 
-  AI[OpenAI]
+  subgraph EXTERNAL[External]
+    AI[OpenAI]
+  end
 
-  PR --> ACTION
-  ACTION --> CD
+  PR --> ORCH
+  ORCH --> CD
   CD --> IA
   IA --> RED
   RED --> GEN
   GEN --> VAL
   VAL --> DEDUPE
   DEDUPE --> COMMIT
-  COMMIT --> PR
-  VAL --> ART
-  ART --> LOG
   COMMIT --> ART
-  LOG --> GH
+  ART --> CHECKS
+  LOG --> CHECKS
   GEN --> AI
-  CODEOWNERS --> GH
-  BRANCH_PROT --> GH
+  CHECKS --> PR
+  CODEOWNERS --> CHECKS
+  BRPROT --> CHECKS
 ```
 
 Notes:
@@ -117,28 +120,37 @@ Notes:
 ## Data flow (detailed)
 1. A `pull_request` or manual `workflow_dispatch` event starts the Orchestrator.
 2. Orchestrator calls Change Detector to fetch the PR changed file list and
-   diff.
+  diff.
 3. Impact Analyzer maps changed code elements to potentially affected
-   documentation files (README, Markdown API docs, OpenAPI specs).
-4. If no docs are affected: run validators relevant to the PR (lint/link);
-   record `automated documentation check` PASS/FAIL and finish.
-5. If docs affected: assemble minimal corpus (only changed code + affected
-   docs fragments) and pass to Redaction Service.
-6. Redaction Service attempts to sanitize sensitive data; on success pass the
-   sanitized corpus to Doc Generator. On failure, abort with artifact.
-7. Doc Generator composes prompts using the sanitized corpus and calls the
-   external AI (OpenAI). The generated candidate docs/diffs are returned.
-8. Validators run on generated output (OpenAPI, Markdown lint, links,
-   structural checks). Selective tests run where determinable.
-9. If validators fail: upload artifact, set `Automated Documentation Check`=
-   FAIL, do not commit (FR-016), finish.
-10. If validators pass: compute deterministic fingerprints (input state +
-    generated output). Deduplication module checks for prior processing. If
-    new, Committer writes one atomic commit to the PR branch with the
-    required footer and bot author; Artifact Manager uploads artifacts.
+  documentation files (README, Markdown API docs, OpenAPI specs).
+4. Pre-generation validation: run deterministic validators on the current PR
+  state (OpenAPI syntax, Markdown lint, internal/relative link checks, and
+  other deterministic checks). If any pre-generation validator FAILS → set
+  `Automated Documentation Check`=FAIL, upload diagnostic artifact, and
+  finish (FR-007, FR-009). This prevents unnecessary AI calls when the
+  input state is invalid.
+5. If no docs are affected after analysis: record `automated documentation
+  check` PASS/FAIL and finish.
+6. If docs are affected and pre-generation validation passed: assemble the
+  minimal corpus (only changed code + affected docs fragments) and pass to
+  the Redaction Service.
+7. Redaction Service attempts to sanitize sensitive data; on success pass
+  the sanitized corpus to Doc Generator. On failure, abort with artifact.
+8. Doc Generator composes prompts using the sanitized corpus and calls the
+  external AI (OpenAI). The generated candidate docs/diffs are returned.
+9. Post-generation validation: run validators on generated output (OpenAPI,
+  Markdown lint, links, structural checks). Selective tests run where
+  determinable. If post-generation validators FAIL → upload artifact, set
+  `Automated Documentation Check`=FAIL, do not commit (FR-007), and report
+  results per FR-009; finish.
+10. If post-generation validators PASS: compute deterministic fingerprints
+   (input state + generated output). Deduplication module checks for prior
+   processing. If new, Committer writes one atomic commit to the PR branch
+   with the required footer and bot author; Artifact Manager uploads
+   artifacts.
 11. Orchestrator sets `Automated Documentation Check`=PASS and leaves the
-    PR in `Required CODEOWNER Review`=PENDING state. Human CODEOWNER review
-    must then approve via native GitHub review to satisfy merge readiness.
+   PR in `Required CODEOWNER Review`=PENDING state. Human CODEOWNER review
+   must then approve via native GitHub review to satisfy merge readiness.
 
 ---
 
@@ -190,18 +202,32 @@ if required (FR-011).
 ---
 
 ## Validation flow
-1. Run syntax validators (OpenAPI parser, Markdown lint) — deterministic
-   checks.
-2. Run link checker for internal/relative link validity.
-3. Run structural consistency checks: map code changes to declared API
-   endpoints/parameters and compare to docs/OpenAPI where possible.
-4. Run selective tests that map to changed files (if determinable).
-5. Evaluation:
-   - If any mandatory validator FAILS → mark `Automated Documentation Check`=
-     FAIL and upload diagnostic artifact; do not create documentation commit
-     (FR-016).
-   - If all mandatory validators PASS → mark `Automated Documentation Check`=
-     PASS and proceed to deduplication/commit stage.
+Validation is performed in two distinct phases as described above: pre-
+generation validation and post-generation validation. See the Data Flow
+section for where each phase is executed in the pipeline.
+
+Detailed validator responsibilities:
+- Syntax validators: OpenAPI parser, Markdown lint — deterministic checks
+  run as pre- and post-generation validators where applicable.
+- Link checker: internal/relative link validity — run pre- and post-
+  generation to validate links in both existing and generated docs.
+- Structural consistency checks: map code changes to declared API
+  endpoints/parameters and compare to docs/OpenAPI where possible — run as
+  post-generation validation primarily, and as pre-generation where static
+  analysis applies.
+- Selective tests: run tests relevant to changed files when determinable —
+  typically post-generation, or pre-generation when mapping is available.
+
+Evaluation:
+- If any mandatory validator FAILS in pre-generation validation → set
+  `Automated Documentation Check`=FAIL, upload diagnostic artifact, and
+  abort generation (FR-007, FR-009).
+- If any mandatory validator FAILS in post-generation validation → set
+  `Automated Documentation Check`=FAIL, upload diagnostic artifact, and do
+  not create a commit (FR-007, FR-009).
+- If all mandatory validators PASS in post-generation validation → set
+  `Automated Documentation Check`=PASS and proceed to deduplication and
+  commit stage.
 
 ---
 
@@ -286,14 +312,19 @@ Examples of capability → selection criteria (no final selection):
 |---|---|
 | Triggering & orchestration | FR-001, FR-011 |
 | Change detection & impact analysis | FR-003, FR-004 |
+| Supported documentation scope | FR-004 |
 | Redaction & secrets policy | FR-013, NFR-001 |
 | Generation & AI boundary | FR-005, FR-012 |
-| Validation & blocking | FR-007, FR-009, FR-016 |
-| Commit traceability | FR-006, FR-005 |
+| Validation & blocking (pre/post) | FR-007, FR-009 |
+| Commit traceability & footer | FR-006, FR-005 |
 | Observability & artifacts | FR-010, NFR-006 |
 | Idempotency & reliability | NFR-002 |
+| Selective testing | FR-014 |
 | Runtime limits | FR-015 |
 | Approval gating | FR-008 |
+
+Note: FR-002 (Supported Platforms) applies to the overall architecture
+scope (GitHub-only for v1) and is referenced in the system description.
 
 All references above point to the approved `docs/requirements.md`.
 

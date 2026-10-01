@@ -1,4 +1,5 @@
-"""Synchronize documentation with analyzed source-code changes.
+from __future__ import annotations
 
-Implementation will be added during the implementation phase.
-"""
+from .orchestrator import process_pull_request, run_documentation_sync
+
+__all__ = ['run_documentation_sync', 'process_pull_request']

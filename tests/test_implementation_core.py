@@ -4,8 +4,10 @@ import pytest
 
 from doc_sync.analyzer import analyze_impact
 from doc_sync.detector import detect_changes
+from doc_sync.generator import generate_docs
+from doc_sync.github_client import check_pr_approval_state
 from doc_sync.idempotency import compute_processing_identity, is_stale_run
-from doc_sync.models import PRContext, ValidationResult
+from doc_sync.models import GenerationRequest, PRContext, ProcessingIdentity, ValidationResult
 from doc_sync.redactor import redact_corpus
 from doc_sync.validator import run_validators
 
@@ -152,3 +154,180 @@ def test_commit_only_updates_allowed_documents() -> None:
         assert "src/app.py" in changed
         assert "README.md" in changed
         assert set(allowed).issubset(set(changed))
+
+
+def test_run_validators_rejects_malformed_openapi() -> None:
+    result = run_validators(
+        "pre_generation",
+        PRContext(
+            repo="demo/repo",
+            owner="demo",
+            pr_number=99,
+            head_sha="head-99",
+            base_sha="base-99",
+            event_name="pull_request",
+            workflow_run_id="run-99",
+        ),
+        {"openapi.json": '{"openapi": "3.0.0", "paths": [}', "README.md": "# Demo\n"},
+        ["README.md", "openapi.json"],
+    )
+    assert result.status == "fail"
+    assert any("openapi" in message.lower() for message in result.errors)
+
+
+def test_run_validators_rejects_broken_relative_link() -> None:
+    result = run_validators(
+        "post_generation",
+        PRContext(
+            repo="demo/repo",
+            owner="demo",
+            pr_number=100,
+            head_sha="head-100",
+            base_sha="base-100",
+            event_name="pull_request",
+            workflow_run_id="run-100",
+        ),
+        {"docs/api.md": "# API\n\nSee [missing guide](../missing.md).\n"},
+        ["docs/api.md"],
+    )
+    assert result.status == "fail"
+    assert any("missing" in message.lower() for message in result.errors)
+
+
+def test_run_validators_rejects_structural_mismatch() -> None:
+    result = run_validators(
+        "post_generation",
+        PRContext(
+            repo="demo/repo",
+            owner="demo",
+            pr_number=101,
+            head_sha="head-101",
+            base_sha="base-101",
+            event_name="pull_request",
+            workflow_run_id="run-101",
+            metadata={"changed_api_summary": "create_user", "documented_api_summary": "delete_user"},
+        ),
+        {"README.md": "# Docs\n\nThis documents delete_user API.\n"},
+        ["README.md"],
+    )
+    assert result.status == "fail"
+    assert any("structural" in message.lower() or "api" in message.lower() for message in result.errors)
+
+
+def test_check_pr_approval_state_requires_real_approval_metadata() -> None:
+    state = check_pr_approval_state(
+        PRContext(
+            repo="demo/repo",
+            owner="demo",
+            pr_number=120,
+            head_sha="abc",
+            base_sha="def",
+            event_name="pull_request",
+            workflow_run_id="run-120",
+            metadata={"has_codeowners": True, "review_required": True, "approved": False, "current_pr_state_matches_review": True},
+        )
+    )
+    assert state.review_valid is False
+    assert state.reason
+
+
+def test_generate_docs_uses_provider_output_not_raw_corpus(monkeypatch) -> None:
+    def fake_provider(payload):
+        return {"README.md": "# Generated Documentation\n\nThis is AI output.\n"}
+
+    import doc_sync.generator as generator_module
+
+    monkeypatch.setattr(generator_module, "generate_with_openai", fake_provider)
+    request = GenerationRequest(
+        pr_context=PRContext(
+            repo="demo/repo",
+            owner="demo",
+            pr_number=121,
+            head_sha="head-121",
+            base_sha="base-121",
+            event_name="pull_request",
+            workflow_run_id="run-121",
+        ),
+        input_corpus={"README.md": "# Input\n"},
+        affected_doc_paths=["README.md"],
+        redacted_corpus={"README.md": "# Input\n"},
+        processing_identity=ProcessingIdentity(
+            pr_number=121,
+            head_sha="head-121",
+            canonical_input="x",
+            doc_state="README.md",
+            fingerprint="abc123",
+        ),
+        allowed_doc_paths=["README.md"],
+    )
+
+    result = generate_docs(request)
+    assert result[0].content == "# Generated Documentation\n\nThis is AI output.\n"
+    assert result[0].source == "ai"
+
+
+def test_check_pr_approval_state_requires_explicit_approval_payload() -> None:
+    state = check_pr_approval_state(
+        PRContext(
+            repo="demo/repo",
+            owner="demo",
+            pr_number=122,
+            head_sha="abc",
+            base_sha="def",
+            event_name="pull_request",
+            workflow_run_id="run-122",
+            metadata={},
+        )
+    )
+
+    assert state.review_valid is False
+    assert "missing" in state.reason.lower() or "invalid" in state.reason.lower()
+
+
+def test_generate_with_openai_does_not_return_raw_corpus() -> None:
+    from doc_sync.generator import generate_with_openai
+
+    result = generate_with_openai({"redacted_corpus": {"README.md": "# Input\n\nActual repository content."}})
+
+    assert result["README.md"] != "# Input\n\nActual repository content."
+    assert "Generated Documentation" in result["README.md"]
+
+
+def test_write_atomic_commit_rejects_stale_repo_head() -> None:
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from doc_sync.committer import write_atomic_commit
+    from doc_sync.models import CommitPlan
+
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        subprocess.run(['git', 'init'], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['git', 'config', 'user.name', 'Test Bot'], cwd=repo, check=True)
+        subprocess.run(['git', 'config', 'user.email', 'test@example.com'], cwd=repo, check=True)
+
+        (repo / 'README.md').write_text('# Demo\n', encoding='utf-8')
+        subprocess.run(['git', 'add', 'README.md'], cwd=repo, check=True)
+        subprocess.run(['git', 'commit', '-m', 'init'], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        head_sha = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+        (repo / 'README.md').write_text('# Demo\n\nUpdated docs\n', encoding='utf-8')
+
+        plan = CommitPlan(
+            branch='main',
+            base_sha='base',
+            head_sha='stale-head',
+            files_to_update=['README.md'],
+            message='Update docs',
+            footer='Docs-Generated-By: test',
+            repo_path=str(repo),
+            allowed_paths=['README.md'],
+        )
+
+        try:
+            write_atomic_commit(plan)
+            assert False, 'stale repo head should have been rejected'
+        except ValueError as exc:
+            assert 'stale' in str(exc).lower() or 'head' in str(exc).lower()
+        assert subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=repo, check=True, capture_output=True, text=True).stdout.strip() == head_sha

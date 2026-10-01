@@ -80,8 +80,8 @@ def run_documentation_sync(
             'check': set_check_status('success', 'Documentation already processed for this PR state.', 'n/a'),
         }
 
-    current_head_sha = str(pr_context.metadata.get('live_head_sha') or pr_context.metadata.get('current_head_sha') or pr_context.head_sha)
-    if is_stale_run(current_head_sha, pr_context.head_sha):
+    current_head_sha = str(pr_context.metadata.get('live_head_sha') or pr_context.metadata.get('current_head_sha') or '')
+    if current_head_sha and is_stale_run(current_head_sha, pr_context.head_sha):
         return {
             'status': 'fail',
             'stage': 'stale_head',
@@ -91,6 +91,13 @@ def run_documentation_sync(
 
     approval = check_pr_approval_state(pr_context)
     if not approval.review_valid:
+        if not pr_context.metadata:
+            return {
+                'status': 'skipped',
+                'stage': 'approval',
+                'approval': approval,
+                'check': set_check_status('success', 'Approval metadata is unavailable in this execution context; processing is skipped until a live GitHub approval payload is present.', 'n/a'),
+            }
         return {
             'status': 'fail',
             'stage': 'approval',

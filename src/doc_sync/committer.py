@@ -6,6 +6,20 @@ from pathlib import Path
 from .models import CommitPlan, PRContext, ValidationResult
 
 
+def _current_repo_head(repo_root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return ''
+    return result.stdout.strip()
+
+
 def prepare_commit(plan: CommitPlan, validation_result: ValidationResult, pr_context: PRContext) -> CommitPlan:
     """Build a commit plan once validation passes and the PR head remains fresh."""
     files = [path for path in plan.files_to_update if path.strip()]
@@ -41,6 +55,12 @@ def write_atomic_commit(commit_plan: CommitPlan) -> str:
             f"{commit_plan.message}\n"
             f"Files: {', '.join(commit_plan.files_to_update)}\n"
             f"Footer: {commit_plan.footer.strip()}"
+        )
+
+    current_head = _current_repo_head(repo_root)
+    if commit_plan.head_sha and current_head and current_head != commit_plan.head_sha:
+        raise ValueError(
+            f'Stale PR head detected: repository HEAD is {current_head}, expected {commit_plan.head_sha}.'
         )
 
     allowed = {str(path).replace('\\', '/').strip() for path in (commit_plan.allowed_paths or commit_plan.files_to_update)}

@@ -217,6 +217,26 @@ def test_run_validators_rejects_structural_mismatch() -> None:
     assert any("structural" in message.lower() or "api" in message.lower() for message in result.errors)
 
 
+def test_pull_request_event_resolves_pr_number_from_event_context() -> None:
+    from doc_sync.cli import _resolve_pr_number
+
+    assert _resolve_pr_number('pull_request', 0) == 0
+    assert _resolve_pr_number('pull_request', 42) == 42
+
+
+def test_workflow_dispatch_with_valid_pr_number_resolves_pr_number() -> None:
+    from doc_sync.cli import _resolve_pr_number
+
+    assert _resolve_pr_number('workflow_dispatch', 99) == 99
+
+
+def test_missing_or_zero_pr_number_fails_safely() -> None:
+    from doc_sync.cli import _resolve_pr_number
+
+    assert _resolve_pr_number('workflow_dispatch', 0) == 0
+    assert _resolve_pr_number('pull_request', 0) == 0
+
+
 def test_check_pr_approval_state_requires_real_approval_metadata() -> None:
     state = check_pr_approval_state(
         PRContext(
@@ -232,6 +252,52 @@ def test_check_pr_approval_state_requires_real_approval_metadata() -> None:
     )
     assert state.review_valid is False
     assert state.reason
+
+
+def test_check_pr_approval_state_false_without_authorized_codeowner_approval() -> None:
+    state = check_pr_approval_state(
+        PRContext(
+            repo="demo/repo",
+            owner="demo",
+            pr_number=220,
+            head_sha="abc",
+            base_sha="def",
+            event_name="pull_request",
+            workflow_run_id="run-220",
+            metadata={
+                'has_codeowners': True,
+                'review_required': True,
+                'approved': False,
+                'current_pr_state_matches_review': True,
+            },
+        )
+    )
+    assert state.review_valid is False
+    assert 'authorized' in state.reason.lower() or 'not approved' in state.reason.lower()
+
+
+def test_check_pr_approval_state_true_with_authorized_codeowner_approval() -> None:
+    state = check_pr_approval_state(
+        PRContext(
+            repo="demo/repo",
+            owner="demo",
+            pr_number=221,
+            head_sha="abc",
+            base_sha="def",
+            event_name="pull_request",
+            workflow_run_id="run-221",
+            metadata={
+                'has_codeowners': True,
+                'review_required': True,
+                'approved': True,
+                'current_pr_state_matches_review': True,
+                'review_head_sha': 'abc',
+                'reviewer': 'demo-owner',
+            },
+        )
+    )
+    assert state.review_valid is True
+    assert state.reason.lower().startswith('native') or 'satisfied' in state.reason.lower()
 
 
 def test_generate_docs_uses_provider_output_not_raw_corpus(monkeypatch) -> None:

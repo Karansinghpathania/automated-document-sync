@@ -94,14 +94,25 @@ def _collect_github_pr_metadata(owner: str, repo: str, pr_number: int, token: st
     return metadata
 
 
-def _resolve_pr_number() -> int:
+def _resolve_pr_number(event_name: str, input_pr_number: int | None = None) -> int:
+    if event_name == 'pull_request':
+        env_value = os.environ.get('PR_NUMBER', '').strip()
+        if env_value.isdigit() and int(env_value) > 0:
+            return int(env_value)
+        if isinstance(input_pr_number, int) and input_pr_number > 0:
+            return input_pr_number
+        ref = os.environ.get('GITHUB_REF', '').strip()
+        match = re.search(r'/pull/(\d+)(?:/|$)', ref)
+        if match:
+            return int(match.group(1))
+        return 0
+
+    if isinstance(input_pr_number, int) and input_pr_number > 0:
+        return input_pr_number
+
     env_value = os.environ.get('PR_NUMBER', '').strip()
-    if env_value.isdigit():
+    if env_value.isdigit() and int(env_value) > 0:
         return int(env_value)
-    ref = os.environ.get('GITHUB_REF', '').strip()
-    match = re.search(r'/pull/(\d+)(?:/|$)', ref)
-    if match:
-        return int(match.group(1))
     return 0
 
 
@@ -113,17 +124,24 @@ def main() -> int:
     parser.add_argument('--base-sha', default=os.environ.get('PR_BASE_SHA', 'local-base'))
     parser.add_argument('--workflow-run-id', default=os.environ.get('WORKFLOW_RUN_ID', 'local-run'))
     parser.add_argument('--token', default=os.environ.get('GITHUB_TOKEN', ''))
-    parser.add_argument('--pr-number', type=int, default=_resolve_pr_number())
+    parser.add_argument('--pr-number', type=int, default=0)
     args = parser.parse_args()
+
+    resolved_pr_number = _resolve_pr_number(args.event, args.pr_number)
+    if resolved_pr_number <= 0:
+        raise SystemExit(
+            'Documentation sync requires a valid PR number. Real pull_request events must provide github.event.pull_request.number; '
+            'workflow_dispatch requires an explicit pr_number input and may not run with PR_NUMBER=0.'
+        )
 
     repo_root = Path.cwd()
     repo_name = args.repo
     owner, _, repo = repo_name.partition('/')
-    metadata = _collect_github_pr_metadata(owner or 'local', repo or repo_name, args.pr_number, args.token, args.head_sha)
+    metadata = _collect_github_pr_metadata(owner or 'local', repo or repo_name, resolved_pr_number, args.token, args.head_sha)
     pr_context = PRContext(
         repo=repo or repo_name,
         owner=owner or 'local',
-        pr_number=args.pr_number,
+        pr_number=resolved_pr_number,
         head_sha=args.head_sha,
         base_sha=args.base_sha,
         event_name=args.event,

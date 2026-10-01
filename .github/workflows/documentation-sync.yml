@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull request number for manual verification. Required for workflow_dispatch.'
+        required: true
+        type: number
 
 permissions:
   contents: write
@@ -43,7 +48,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.number || 0 }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || 0 }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}

@@ -217,22 +217,29 @@ def test_run_validators_rejects_structural_mismatch() -> None:
     assert any("structural" in message.lower() or "api" in message.lower() for message in result.errors)
 
 
-def test_pull_request_event_resolves_pr_number_from_event_context() -> None:
+def test_pull_request_event_resolves_pr_number_from_event_context(monkeypatch) -> None:
     from doc_sync.cli import _resolve_pr_number
 
-    assert _resolve_pr_number('pull_request', 0) == 0
+    monkeypatch.delenv('PR_NUMBER', raising=False)
+    monkeypatch.delenv('GITHUB_REF', raising=False)
     assert _resolve_pr_number('pull_request', 42) == 42
 
+    monkeypatch.setenv('PR_NUMBER', '7')
+    assert _resolve_pr_number('pull_request', 0) == 7
 
-def test_workflow_dispatch_with_valid_pr_number_resolves_pr_number() -> None:
+
+def test_workflow_dispatch_with_valid_pr_number_resolves_pr_number(monkeypatch) -> None:
     from doc_sync.cli import _resolve_pr_number
 
+    monkeypatch.delenv('PR_NUMBER', raising=False)
     assert _resolve_pr_number('workflow_dispatch', 99) == 99
 
 
-def test_missing_or_zero_pr_number_fails_safely() -> None:
+def test_missing_or_zero_pr_number_fails_safely(monkeypatch) -> None:
     from doc_sync.cli import _resolve_pr_number
 
+    monkeypatch.delenv('PR_NUMBER', raising=False)
+    monkeypatch.delenv('GITHUB_REF', raising=False)
     assert _resolve_pr_number('workflow_dispatch', 0) == 0
     assert _resolve_pr_number('pull_request', 0) == 0
 

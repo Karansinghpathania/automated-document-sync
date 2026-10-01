@@ -410,8 +410,11 @@ def test_write_atomic_commit_rejects_stale_repo_head() -> None:
         assert subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=repo, check=True, capture_output=True, text=True).stdout.strip() == head_sha
 
 
-def test_run_documentation_sync_fails_closed_without_provider_credentials() -> None:
+def test_run_documentation_sync_fails_closed_without_provider_credentials(monkeypatch) -> None:
     from doc_sync.orchestrator import run_documentation_sync
+
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+    monkeypatch.setenv('OPENAI_API_KEY', '')
 
     result = run_documentation_sync(
         PRContext(
@@ -439,8 +442,11 @@ def test_run_documentation_sync_fails_closed_without_provider_credentials() -> N
     assert result['stage'] == 'provider_auth'
 
 
-def test_run_documentation_sync_result_is_json_serializable() -> None:
+def test_run_documentation_sync_result_is_json_serializable(monkeypatch) -> None:
     from doc_sync.orchestrator import run_documentation_sync
+
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+    monkeypatch.setenv('OPENAI_API_KEY', '')
 
     result = run_documentation_sync(
         PRContext(

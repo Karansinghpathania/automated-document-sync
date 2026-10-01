@@ -41,13 +41,14 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEY: ""
         run: |
           python -m pytest -q
 
       - name: Run documentation sync orchestration
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || 0 }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

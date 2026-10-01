@@ -7,7 +7,7 @@ from doc_sync.detector import detect_changes
 from doc_sync.generator import generate_docs
 from doc_sync.github_client import check_pr_approval_state
 from doc_sync.idempotency import compute_processing_identity, is_stale_run
-from doc_sync.models import GenerationRequest, PRContext, ProcessingIdentity, ValidationResult
+from doc_sync.models import GenerationRequest, PRContext, ProcessingIdentity
 from doc_sync.redactor import redact_corpus
 from doc_sync.validator import run_validators
 

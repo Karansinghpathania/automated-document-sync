@@ -2,23 +2,25 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
 from .models import CommitPlan, PRContext, ValidationResult
 
 
-def _coerce_commit_plan(commit_plan: CommitPlan | dict[str, object]) -> CommitPlan:
+def _coerce_commit_plan(commit_plan: CommitPlan | dict[str, Any]) -> CommitPlan:
     if isinstance(commit_plan, CommitPlan):
         return commit_plan
+    payload = cast(dict[str, Any], commit_plan)
     return CommitPlan(
-        branch=str(commit_plan.get('branch') or 'main'),
-        base_sha=str(commit_plan.get('base_sha') or ''),
-        head_sha=str(commit_plan.get('head_sha') or ''),
-        files_to_update=[str(item) for item in commit_plan.get('files_to_update', [])],
-        message=str(commit_plan.get('message') or 'Update documentation'),
-        footer=str(commit_plan.get('footer') or 'Docs-Generated-By: workflow-run'),
-        bot_identity=str(commit_plan.get('bot_identity') or 'github-actions[bot]'),
-        repo_path=str(commit_plan.get('repo_path') or ''),
-        allowed_paths=[str(item) for item in commit_plan.get('allowed_paths', [])],
+        branch=str(payload.get('branch') or 'main'),
+        base_sha=str(payload.get('base_sha') or ''),
+        head_sha=str(payload.get('head_sha') or ''),
+        files_to_update=[str(item) for item in payload.get('files_to_update', [])],
+        message=str(payload.get('message') or 'Update documentation'),
+        footer=str(payload.get('footer') or 'Docs-Generated-By: workflow-run'),
+        bot_identity=str(payload.get('bot_identity') or 'github-actions[bot]'),
+        repo_path=str(payload.get('repo_path') or ''),
+        allowed_paths=[str(item) for item in payload.get('allowed_paths', [])],
     )
 
 
@@ -36,7 +38,7 @@ def _current_repo_head(repo_root: Path) -> str:
     return result.stdout.strip()
 
 
-def prepare_commit(plan: CommitPlan | dict[str, object], validation_result: ValidationResult, pr_context: PRContext) -> CommitPlan:
+def prepare_commit(plan: CommitPlan | dict[str, Any], validation_result: ValidationResult, pr_context: PRContext) -> CommitPlan:
     """Build a commit plan once validation passes and the PR head remains fresh."""
     resolved = _coerce_commit_plan(plan)
     files = [path for path in resolved.files_to_update if path.strip()]
@@ -64,7 +66,7 @@ def prepare_commit(plan: CommitPlan | dict[str, object], validation_result: Vali
     )
 
 
-def write_atomic_commit(commit_plan: CommitPlan | dict[str, object]) -> str:
+def write_atomic_commit(commit_plan: CommitPlan | dict[str, Any]) -> str:
     """Create a single atomic documentation commit in the working repository."""
     resolved = _coerce_commit_plan(commit_plan)
     repo_root = Path(resolved.repo_path).resolve() if resolved.repo_path else None

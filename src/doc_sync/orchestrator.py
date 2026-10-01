@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import Any
+from typing import Any, Mapping
 
 from .analyzer import analyze_impact
 from .artifacts import publish_artifact
@@ -60,7 +60,17 @@ def run_documentation_sync(
             'check': set_check_status('success', 'No documentation update needed for this PR.', 'n/a'),
         }
 
-    impact = analyze_impact(detected, repo_state)
+    normalized_detected = [
+        item if isinstance(item, Mapping) else {
+            'path': item.path,
+            'status': item.status,
+            'content': item.content,
+            'diff_hunk': item.diff_hunk,
+            'kind': item.kind,
+        }
+        for item in detected
+    ]
+    impact = analyze_impact(normalized_detected, repo_state)
     if not impact.requires_generation and not impact.allowed_doc_paths:
         return {
             'status': 'no_op',
@@ -92,7 +102,20 @@ def run_documentation_sync(
             'check': set_check_status('failure', 'Pre-generation validation failed.', 'n/a'),
         }
 
-    processing_identity = compute_processing_identity(pr_context, impact.allowed_doc_paths, detected)
+    processing_identity = compute_processing_identity(
+        pr_context,
+        impact.allowed_doc_paths,
+        [
+            {
+                'path': item.path,
+                'status': item.status,
+                'content': item.content,
+                'diff_hunk': item.diff_hunk,
+                'kind': item.kind,
+            }
+            for item in detected
+        ],
+    )
     if resolve_existing_successful_processing(pr_context, processing_identity):
         return {
             'status': 'skipped',

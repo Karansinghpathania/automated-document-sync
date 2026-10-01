@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from doc_sync.analyzer import analyze_impact
@@ -7,7 +9,7 @@ from doc_sync.detector import detect_changes
 from doc_sync.generator import generate_docs
 from doc_sync.github_client import check_pr_approval_state
 from doc_sync.idempotency import compute_processing_identity, is_stale_run
-from doc_sync.models import GenerationRequest, PRContext, ProcessingIdentity
+from doc_sync.models import GenerationRequest, PRContext, ProcessingIdentity, to_jsonable
 from doc_sync.redactor import redact_corpus
 from doc_sync.validator import run_validators
 
@@ -361,6 +363,35 @@ def test_run_documentation_sync_fails_closed_without_provider_credentials() -> N
 
     assert result['status'] == 'fail'
     assert result['stage'] == 'provider_auth'
+
+
+def test_run_documentation_sync_result_is_json_serializable() -> None:
+    from doc_sync.orchestrator import run_documentation_sync
+
+    result = run_documentation_sync(
+        PRContext(
+            repo='demo/repo',
+            owner='demo',
+            pr_number=201,
+            head_sha='head-201',
+            base_sha='base-201',
+            event_name='pull_request',
+            workflow_run_id='run-201',
+            metadata={
+                'has_codeowners': True,
+                'review_required': True,
+                'approved': True,
+                'current_pr_state_matches_review': True,
+                'require_provider_auth': True,
+            },
+        ),
+        changed_files=[{'path': 'README.md', 'status': 'modified', 'content': '# Docs'}],
+        repo_state={'docs': ['README.md'], 'source': []},
+        corpus={'README.md': '# Docs\n\nThis needs generation.'},
+    )
+
+    dumped = json.dumps(to_jsonable(result))
+    assert 'provider_auth' in dumped
 
 
 def test_generate_with_openai_strict_mode_rejects_missing_key() -> None:

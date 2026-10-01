@@ -18,9 +18,10 @@ The repository-level repair pass addressed the concrete issues that were still b
 
 - fixed the static analysis issues in [src/doc_sync/analyzer.py](src/doc_sync/analyzer.py), [src/doc_sync/committer.py](src/doc_sync/committer.py), and [src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py)
 - removed the unneeded unused import in [tests/test_implementation_core.py](tests/test_implementation_core.py)
+- fixed the live GitHub workflow runtime bug in [src/doc_sync/cli.py](src/doc_sync/cli.py) and [src/doc_sync/models.py](src/doc_sync/models.py) by converting dataclass-heavy results into JSON-safe output before printing them
 - preserved the fail-closed provider and approval semantics already required by the approved design
 
-This means the local implementation is now validated for lint, typing, and regression behavior, and it is ready for the live GitHub PR verification phase rather than being claimed as complete without external runtime evidence.
+This means the local implementation is now validated for lint, typing, and regression behavior, and the GitHub Action path is corrected for the real PR execution environment.
 
 ## Test Execution
 
@@ -48,7 +49,7 @@ Results:
 - TASK-008: VERIFIED
 - TASK-009: VERIFIED
 - TASK-010: VERIFIED
-- TASK-011: READY FOR LIVE GITHUB EVIDENCE
+- TASK-011: LIVE GITHUB EXECUTION IN PROGRESS
 
 ## Acceptance Criteria
 
@@ -64,5 +65,5 @@ PASS
 
 ## Next Action
 
-Proceed to the live GitHub PR, workflow execution, CODEOWNERS review, and final Phase 8 evidence collection against the repository in GitHub.
+Re-run the GitHub workflow on the live PR, confirm the check passes, and await the required CODEOWNERS review before the final merge-ready state can be declared.
 

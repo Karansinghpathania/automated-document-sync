@@ -6,7 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from .models import PRContext
+from .models import PRContext, to_jsonable
 from .orchestrator import run_documentation_sync
 
 
@@ -67,7 +67,7 @@ def main() -> int:
     repo_state = {'docs': ['README.md'], 'source': []}
     corpus = {'README.md': '# Documentation\n'}
     result = run_documentation_sync(pr_context, changed_files, repo_state, corpus)
-    print(json.dumps(result, sort_keys=True, indent=2))
+    print(json.dumps(to_jsonable(result), sort_keys=True, indent=2))
     return 0 if result.get('status') in {'success', 'no_op', 'skipped'} else 1
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Mapping
 
 
@@ -148,4 +148,16 @@ def canonicalize(value: Mapping[str, Any] | Any) -> str:
         return str(dict(sorted(value.items())))
     if isinstance(value, (list, tuple, set)):
         return str(sorted(str(item) for item in value))
+    return str(value)
+
+
+def to_jsonable(value: Any) -> Any:
+    if is_dataclass(value):
+        return {key: to_jsonable(item) for key, item in asdict(value).items()}
+    if isinstance(value, Mapping):
+        return {str(key): to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [to_jsonable(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
     return str(value)

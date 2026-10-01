@@ -5,6 +5,7 @@ import json
 import pytest
 
 from doc_sync.analyzer import analyze_impact
+from doc_sync.cli import _collect_github_pr_metadata
 from doc_sync.detector import detect_changes
 from doc_sync.generator import generate_docs
 from doc_sync.github_client import check_pr_approval_state
@@ -392,6 +393,48 @@ def test_run_documentation_sync_result_is_json_serializable() -> None:
 
     dumped = json.dumps(to_jsonable(result))
     assert 'provider_auth' in dumped
+
+
+def test_collect_github_pr_metadata_uses_live_pr_review_state(monkeypatch) -> None:
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(self.payload).encode('utf-8')
+
+    def fake_urlopen(request, timeout=None):
+        url = request.full_url
+        if url.endswith('/contents/.github/CODEOWNERS'):
+            return FakeResponse({'path': '.github/CODEOWNERS'})
+        if url.endswith('/contents/CODEOWNERS'):
+            return FakeResponse({'path': 'CODEOWNERS'})
+        if url.endswith('/pulls/42/reviews'):
+            return FakeResponse([
+                {
+                    'state': 'APPROVED',
+                    'commit_id': 'abc123',
+                    'user': {'login': 'reviewer'},
+                }
+            ])
+        raise AssertionError(f'unexpected URL: {url}')
+
+    monkeypatch.setattr('urllib.request.urlopen', fake_urlopen)
+
+    metadata = _collect_github_pr_metadata('demo', 'repo', 42, 'token', 'abc123')
+
+    assert metadata['has_codeowners'] is True
+    assert metadata['review_required'] is True
+    assert metadata['approved'] is True
+    assert metadata['current_pr_state_matches_review'] is True
+    assert metadata['review_head_sha'] == 'abc123'
+    assert metadata['reviewer'] == 'reviewer'
 
 
 def test_generate_with_openai_strict_mode_rejects_missing_key() -> None:

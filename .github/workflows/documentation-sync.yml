@@ -43,10 +43,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.number || 0 }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name || github.repository }}
         run: |
-          python -m doc_sync.cli --event "${{ github.event_name }}" --repo "${GITHUB_REPOSITORY}" --head-sha "${PR_HEAD_SHA}" --base-sha "${PR_BASE_SHA}" --workflow-run-id "${WORKFLOW_RUN_ID}" --token "${GITHUB_TOKEN}"
+          python -m doc_sync.cli --event "${{ github.event_name }}" --repo "${GITHUB_REPOSITORY}" --pr-number "${PR_NUMBER}" --head-sha "${PR_HEAD_SHA}" --base-sha "${PR_BASE_SHA}" --workflow-run-id "${WORKFLOW_RUN_ID}" --token "${GITHUB_TOKEN}"

@@ -287,10 +287,11 @@ def test_check_pr_approval_state_requires_explicit_approval_payload() -> None:
 def test_generate_with_openai_does_not_return_raw_corpus() -> None:
     from doc_sync.generator import generate_with_openai
 
-    result = generate_with_openai({"redacted_corpus": {"README.md": "# Input\n\nActual repository content."}})
-
-    assert result["README.md"] != "# Input\n\nActual repository content."
-    assert "Generated Documentation" in result["README.md"]
+    try:
+        generate_with_openai({"redacted_corpus": {"README.md": "# Input\n\nActual repository content."}})
+        assert False, 'missing provider credentials should fail closed instead of returning raw corpus content'
+    except RuntimeError:
+        pass
 
 
 def test_write_atomic_commit_rejects_stale_repo_head() -> None:
@@ -331,3 +332,42 @@ def test_write_atomic_commit_rejects_stale_repo_head() -> None:
         except ValueError as exc:
             assert 'stale' in str(exc).lower() or 'head' in str(exc).lower()
         assert subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=repo, check=True, capture_output=True, text=True).stdout.strip() == head_sha
+
+
+def test_run_documentation_sync_fails_closed_without_provider_credentials() -> None:
+    from doc_sync.orchestrator import run_documentation_sync
+
+    result = run_documentation_sync(
+        PRContext(
+            repo='demo/repo',
+            owner='demo',
+            pr_number=200,
+            head_sha='head-200',
+            base_sha='base-200',
+            event_name='pull_request',
+            workflow_run_id='run-200',
+            metadata={
+                'has_codeowners': True,
+                'review_required': True,
+                'approved': True,
+                'current_pr_state_matches_review': True,
+                'require_provider_auth': True,
+            },
+        ),
+        changed_files=[{'path': 'README.md', 'status': 'modified', 'content': '# Docs'}],
+        repo_state={'docs': ['README.md'], 'source': []},
+        corpus={'README.md': '# Docs\n\nThis needs generation.'},
+    )
+
+    assert result['status'] == 'fail'
+    assert result['stage'] == 'provider_auth'
+
+
+def test_generate_with_openai_strict_mode_rejects_missing_key() -> None:
+    from doc_sync.generator import generate_with_openai
+
+    try:
+        generate_with_openai({'redacted_corpus': {'README.md': '# Input\n'}, 'strict': True, 'require_provider_auth': True})
+        assert False, 'strict provider mode should reject a missing API key'
+    except RuntimeError:
+        pass

@@ -2,319 +2,414 @@
 
 ## Review Scope
 
-This review evaluates the repository as it exists now against the approved requirement and architecture artifacts, without relying on completion status files or earlier assumptions.
+This review used the authoritative sources and the actual implementation in:
 
-- requirements: [docs/requirements.md](docs/requirements.md)
-- architecture: [docs/architecture.md](docs/architecture.md)
-- design review: [docs/design-review.md](docs/design-review.md)
-- source: [src/doc_sync](src/doc_sync)
-- tests: [tests](tests)
-- workflow: [.github/workflows/documentation-sync.yml](.github/workflows/documentation-sync.yml)
-- CODEOWNERS: [.github/CODEOWNERS](.github/CODEOWNERS)
-- project config: [pyproject.toml](pyproject.toml)
-- repository state: git status and diff hygiene checks
+- [requirements.md](requirements.md)
+- [architecture.md](architecture.md)
+- [design-review.md](design-review.md)
+- [imp-plan.md](imp-plan.md)
+- [implementation-status.md](implementation-status.md)
+- [README.md](../README.md)
+- [src/doc_sync](../src/doc_sync)
+- [tests](../tests)
+- [.github/workflows/documentation-sync.yml](../.github/workflows/documentation-sync.yml)
+- [.github/CODEOWNERS](../.github/CODEOWNERS)
+- [pyproject.toml](../pyproject.toml)
+- the current Git state and diff output
+
+The review did not rely on the status file as proof. It evaluated the current code and its behavior directly.
 
 ## Review Method
 
 The review followed the required order:
 
-Requirements → Architecture → Design Review → Actual Implementation → Tests
+1. Requirements
+2. Architecture
+3. Design review
+4. Implementation plan
+5. Actual implementation
+6. Tests
 
-The implementation was checked for correctness, maintainability, GitHub enforcement, human approval safety, AI boundary safety, stale-head protection, validation strength, and production readiness.
+The review also checked the real GitHub model implied by the architecture and the workflow, and it specifically looked for approval, stale-head, AI safety, validation, and atomic commit boundaries.
 
 ## Test Execution
 
-Commands executed:
+Commands executed during review:
 
-- `python -m pytest --collect-only -q`
-- `python -m pytest -q`
-- `git status --short`
-- `git diff --check`
+- python -m pytest --collect-only -q
+- python -m pytest -q
+- git status --short
+- git diff --check
 
-Observed results:
+Observed evidence:
 
-- 19 tests collected
-- 19 passed in 1.11s
-- `git status --short` showed only review/status changes and the review artifact itself
-- `git diff --check` returned no output
-
-This confirms the repo is currently clean and the local smoke suite passes. It does not prove that the implementation satisfies the production-grade requirements.
+- The current repository exports a Python test suite that executes successfully.
+- The final run at review time reported 25 passed in 2.50s.
+- Passing tests are useful evidence, but they do not prove live GitHub approval enforcement or stale-head protection in the production runtime.
 
 ## Executive Summary
 
-The current implementation is improved relative to the earlier placeholder version, but it is still not ready for Phase 8 verification.
+The implementation is not ready for Phase 8 verification.
 
-The strongest remaining issues are all in the production-critical boundary layer:
-
-- approval enforcement is still based on metadata defaults rather than the live GitHub review state
-- the AI generation boundary is still an in-memory stub, not a real external provider call
-- stale-head protection is still not enforced as a final hard gate right before commit
-- validation remains too narrow to satisfy the required contract for OpenAPI, link, and structural correctness
-
-Final decision: BLOCKED.
+The project has improved from the earlier placeholder state, but it still does not satisfy the production-critical requirements for human approval enforcement, stale-head protection, and fail-closed AI execution. The architecture is still stronger than the actual runtime proof, and the implementation is not yet demonstrated to be safe under real GitHub conditions.
 
 ## Critical Findings
 
 ## CR-001 —
 Severity: CRITICAL
-Category: Human approval enforcement is not genuine
+Category: Human approval enforcement is still not native GitHub enforcement
 
 Location:
-[src/doc_sync/github_client.py](src/doc_sync/github_client.py), [src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py)
+[src/doc_sync/github_client.py](../src/doc_sync/github_client.py), [src/doc_sync/orchestrator.py](../src/doc_sync/orchestrator.py), [.github/workflows/documentation-sync.yml](../.github/workflows/documentation-sync.yml)
 
 Evidence:
-`check_pr_approval_state` defaults `has_codeowners`, `review_required`, `approved`, and `current_pr_state_matches_review` to `True` when metadata is absent. The orchestrator then treats the result as a hard gate. This is not a live GitHub review-state inspection and it does not validate a CODEOWNERS-approved reviewer.
+The approval helper evaluates metadata values such as has_codeowners, review_required, approved, and current_pr_state_matches_review. It does not fetch live PR review state from GitHub and does not verify CODEOWNERS authorization against the current PR head.
 
 Requirement/Architecture Reference:
-FR-008, DR-002, architecture approval flow
+FR-008, FR-007, FR-011, architecture approval section, design review DR-002.
 
 Problem:
-The implementation still treats approval as optional local metadata rather than a verified GitHub approval boundary.
+The implementation still relies on local metadata assumptions rather than the actual GitHub approval state.
 
 Impact:
-A PR can pass the approval gate without a real review or CODEOWNERS authorization, which violates the human approval requirement.
+This creates an approval bypass risk and violates the requirement that human approval must be enforced through the repository’s native PR review flow.
 
 Recommended Fix:
-Query the live PR review state from GitHub, verify CODEOWNERS approval, and fail closed if the repository cannot prove a valid approval on the current PR head.
+Resolve the current PR review state from GitHub, verify CODEOWNERS coverage for the changed docs, and fail closed if the repository cannot prove an authorized approval for the current head.
 
 Verification:
-Confirmed by direct inspection of [src/doc_sync/github_client.py](src/doc_sync/github_client.py) and [src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py).
+Confirmed by direct inspection of [src/doc_sync/github_client.py](../src/doc_sync/github_client.py) and [src/doc_sync/orchestrator.py](../src/doc_sync/orchestrator.py).
 
 ## CR-002 —
 Severity: CRITICAL
-Category: AI boundary is still a stub
+Category: Final stale-head protection is not demonstrated immediately before commit
 
 Location:
-[src/doc_sync/generator.py](src/doc_sync/generator.py), [src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py)
+[src/doc_sync/orchestrator.py](../src/doc_sync/orchestrator.py), [src/doc_sync/committer.py](../src/doc_sync/committer.py), [src/doc_sync/idempotency.py](../src/doc_sync/idempotency.py)
 
 Evidence:
-`generate_with_openai` returns the input corpus unchanged. There is no authenticated external provider call, no correct retry classification, and no transient-only retry policy. The generator does not model a real AI safety boundary.
+The runtime checks a stale head using metadata values, but the live PR head is not re-fetched immediately before the commit boundary in a way that forces a hard abort. The commit helper compares repo HEAD to a captured SHA, but the orchestration path does not prove the final GitHub PR head is the one that was approved and validated.
 
 Requirement/Architecture Reference:
-FR-012, NFR-008, architecture AI boundary
+FR-005, FR-016, DR-001, NFR-002, architecture stale-head sequence.
 
 Problem:
-The repository still claims an AI-based documentation pipeline while the actual boundary is a local in-memory pass-through with no real external dependency.
+The pipeline can still commit after a branch moves if the final pre-commit check is not tied to the live PR head at the exact commit point.
 
 Impact:
-This violates the design review and requirement expectations around AI safety, output trust, and retry behavior.
+This creates a stale-run race condition and can overwrite newer branch state with older generated docs.
 
 Recommended Fix:
-Place the external provider behind a strict boundary, enforce a single retry only for transient 5xx or network failures, and fail closed on auth/validation issues.
+Fetch the live PR head immediately before commit and abort when the head differs from the captured SHA. The commit path must fail closed, not warn.
 
 Verification:
-Confirmed by direct inspection of [src/doc_sync/generator.py](src/doc_sync/generator.py) and the orchestration path in [src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py).
+Confirmed by the orchestration and commit flow in [src/doc_sync/orchestrator.py](../src/doc_sync/orchestrator.py) and [src/doc_sync/committer.py](../src/doc_sync/committer.py).
 
 ## CR-003 —
 Severity: CRITICAL
-Category: Final stale-head guard is still missing immediately before commit
+Category: AI generation boundary is still not fail-closed by default
 
 Location:
-[src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py), [src/doc_sync/idempotency.py](src/doc_sync/idempotency.py), [src/doc_sync/committer.py](src/doc_sync/committer.py)
+[src/doc_sync/generator.py](../src/doc_sync/generator.py), [src/doc_sync/orchestrator.py](../src/doc_sync/orchestrator.py)
 
 Evidence:
-The code checks stale state before generation, but it does not re-fetch the live PR head immediately before the commit stage and abort if the state differs. The final commit path is not guarded by a live-state comparison.
+The generator contains fallback behavior that synthesizes documentation when the provider key is absent. The actual runtime only fails closed when strict metadata is set by the caller. That means the real workflow can still silently fall back to synthetic output rather than refusing to run when a live provider-backed generation is required.
 
 Requirement/Architecture Reference:
-DR-001, NFR-002, architecture stale-head sequence
+FR-012, FR-013, NFR-008, architecture AI boundary, design review DR-003 and DR-005.
 
 Problem:
-A stale run can still reach the commit stage after the branch head changes.
+The AI boundary is not sufficiently hardened to enforce a fail-closed model in normal execution.
 
 Impact:
-The system can commit documentation against an outdated PR head, creating incorrect or conflicting changes.
+This weakens the safety boundary and can generate documentation that is not backed by a real provider run or validated against the current PR state.
 
 Recommended Fix:
-Re-fetch the current PR head just before commit and fail if it differs from the captured SHA.
+Require a live provider-backed generation path when the workflow is in generation mode, and fail closed when credentials or provider execution are not available. Treat AI output as untrusted and continue only after deterministic validation.
 
 Verification:
-Confirmed by the orchestration flow in [src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py) and the commit helper in [src/doc_sync/committer.py](src/doc_sync/committer.py).
+Confirmed by direct inspection of [src/doc_sync/generator.py](../src/doc_sync/generator.py) and [src/doc_sync/orchestrator.py](../src/doc_sync/orchestrator.py).
 
 ## High Findings
 
-## CR-004 —
+## HR-001 —
 Severity: HIGH
-Category: Validation remains incomplete for the required production checks
+Category: CODEOWNERS and approval semantics are not proved at runtime
 
 Location:
-[src/doc_sync/validator.py](src/doc_sync/validator.py)
+[.github/CODEOWNERS](../.github/CODEOWNERS), [src/doc_sync/github_client.py](../src/doc_sync/github_client.py), [src/doc_sync/cli.py](../src/doc_sync/cli.py)
 
 Evidence:
-The validator improved beyond the original placeholder, but it still does not provide the full required deterministic stack: robust OpenAPI parsing, comprehensive link validation, markdown lint semantics, and structural drift detection for API/documentation mismatches.
+The repository defines an owner entry, but the approval path does not inspect the live review state or verify that the reviewer is authorized for the changed docs. The CLI also fills approval metadata with defaults, which is not a proof of real GitHub behavior.
 
 Requirement/Architecture Reference:
-FR-007, FR-016, architecture validation flow
+FR-008, architecture approval flow, design review DR-002.
 
 Problem:
-The validation gate is still too narrow to guarantee the correctness required by the requirements.
+Approval semantics are still modeled as local metadata, not native GitHub review state.
 
 Impact:
-Broken or misleading documentation may pass the gate even when the underlying API contract has changed.
+The workflow can create a false sense of required review while never proving that an authorized reviewer approved the current head.
 
 Recommended Fix:
-Implement real OpenAPI parsing, full link validation, markdown correctness checks, and deterministic structural drift validation against the changed API summary.
+Integrate the workflow with live PR review state and enforce CODEOWNERS validation through GitHub-native data.
 
 Verification:
-Confirmed by direct inspection of [src/doc_sync/validator.py](src/doc_sync/validator.py).
+Confirmed by the code paths in [src/doc_sync/github_client.py](../src/doc_sync/github_client.py) and [src/doc_sync/cli.py](../src/doc_sync/cli.py).
 
-## CR-005 —
+## HR-002 —
 Severity: HIGH
-Category: Artifact contract is still placeholder-level
+Category: Validation is insufficient to prove semantic correctness
 
 Location:
-[src/doc_sync/artifacts.py](src/doc_sync/artifacts.py), [src/doc_sync/logging.py](src/doc_sync/logging.py), [src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py)
+[src/doc_sync/validator.py](../src/doc_sync/validator.py)
 
 Evidence:
-Artifacts are still emitted as a simple URI-like value and logs do not provide a durable structured manifest with run metadata, validation state, retry information, and failure diagnostics.
+The validator checks Markdown headings, relative links, malformed JSON, and some structural mismatch metadata, but it does not prove real semantic drift detection against the actual API contract. It remains a useful deterministic layer, but not a production-grade semantic safety gate.
 
 Requirement/Architecture Reference:
-FR-010, NFR-006
+FR-007, FR-016, architecture validation flow, design review DR-004.
 
 Problem:
-The observability and artifact contract remains too lightweight for audit and production debugging.
+The system can pass validation while still producing incorrect documentation for API changes.
 
 Impact:
-Operational review of failed runs is weak and the required evidence trail is not complete enough for production use.
+The generated docs may be structurally valid but semantically wrong or misleading.
 
 Recommended Fix:
-Define a stable artifact schema with required fields and attach it to the workflow check summary.
+Add a stricter semantic validation layer and treat semantic uncertainty as a failure or a manual review gate, not as a pass.
 
 Verification:
-Confirmed by inspection of [src/doc_sync/artifacts.py](src/doc_sync/artifacts.py) and [src/doc_sync/logging.py](src/doc_sync/logging.py).
+Confirmed by reviewing [src/doc_sync/validator.py](../src/doc_sync/validator.py) against the requirement and architecture language.
+
+## HR-003 —
+Severity: HIGH
+Category: GitHub workflow is scaffolding, not proof of production enforcement
+
+Location:
+[.github/workflows/documentation-sync.yml](../.github/workflows/documentation-sync.yml), [src/doc_sync/cli.py](../src/doc_sync/cli.py)
+
+Evidence:
+The workflow runs pytest and then executes the CLI, but it does not prove real GitHub approval state, repo-head validation, or a final stale-head abort immediately before commit. The workflow is a good deployment scaffold but not a live proof of the required security boundary.
+
+Requirement/Architecture Reference:
+FR-001, FR-008, FR-011, FR-016, architecture approval and stale-head sections.
+
+Problem:
+The workflow does not show the production-grade gate that the requirements require.
+
+Impact:
+The pipeline can pass in the repository but still be unsafe in actual PR execution.
+
+Recommended Fix:
+Use GitHub-native review and status data as part of the workflow decision path, and enforce the final stale-head gate before commit.
+
+Verification:
+Confirmed by the workflow sequence in [.github/workflows/documentation-sync.yml](../.github/workflows/documentation-sync.yml).
 
 ## Medium Findings
 
-## CR-006 —
+## MR-001 —
 Severity: MEDIUM
-Category: Test coverage is better but still not sufficient for production behavior
+Category: Test suite does not cover the real runtime safety boundary
 
 Location:
-[tests](tests)
+[tests](../tests)
 
 Evidence:
-The suite covers several important edge cases, but it still does not validate live GitHub approval enforcement, stale-head rejection immediately before commit, or real external AI retry semantics.
+The suite includes useful unit tests, but it does not directly verify live GitHub PR approval semantics, stale head rejection just before commit, or provider-auth fail-closed behavior in a real workflow context.
 
 Requirement/Architecture Reference:
-FR-014, NFR-005
+FR-014, NFR-005, DR-001, DR-002.
 
 Problem:
-The tests are stronger than the original smoke tests, but they still do not prove the actual production contract.
+Passing tests do not prove the safety boundary required for a GitHub-native process.
 
 Impact:
-The project can pass local tests while still failing in a real repository context.
+The test suite can pass while a real PR still violates the required approval and commit gates.
 
 Recommended Fix:
-Add tests for live approval failure, stale-head aborts, transient vs non-transient provider errors, and real workflow failure states.
+Add end-to-end workflow tests for approval gating, stale-head rejection, and provider failure behavior.
 
 Verification:
-Confirmed by direct review of the files under [tests](tests).
+Confirmed by review of the current tests under [tests](../tests).
 
-## CR-007 —
+## MR-002 —
 Severity: MEDIUM
-Category: CODEOWNERS validity is not the same as runtime enforcement
+Category: Artifact and observability contract is still not complete enough for incident handling
 
 Location:
-[.github/CODEOWNERS](.github/CODEOWNERS), [src/doc_sync/github_client.py](src/doc_sync/github_client.py)
+[src/doc_sync/artifacts.py](../src/doc_sync/artifacts.py), [src/doc_sync/logging.py](../src/doc_sync/logging.py)
 
 Evidence:
-The CODEOWNERS file is valid and points to a real account, but the runtime still does not inspect live CODEOWNERS review state as part of the approval gate.
+The project emits some logs and artifact metadata, but the contract is not fully defined enough to ensure consistent reporting across pass, fail, retry, stale-head, and validation failures.
 
 Requirement/Architecture Reference:
-FR-008, DR-002
+FR-009, FR-010, NFR-006, DR-008.
 
 Problem:
-The repo can have a valid CODEOWNERS file without the implementation actually enforcing it at runtime.
+The artifact model still lacks the exact schema and lifecycle needed for operational evidence.
 
 Impact:
-The human approval boundary remains unsatisfied in the real runtime context.
+Failure analysis is weaker than required for a production controlled workflow.
 
 Recommended Fix:
-Tie the approval check to live review and code-ownership evaluation on the current PR head.
+Define and validate a single artifact schema and ensure every failure path publishes its reason and metadata in that format.
 
 Verification:
-Confirmed by direct inspection of [src/doc_sync/github_client.py](src/doc_sync/github_client.py).
+Confirmed by code inspection of the artifact and logger modules.
 
 ## Low Findings
 
-## CR-008 —
+## LR-001 —
 Severity: LOW
-Category: Workflow/runtime isolation remains thin
+Category: Repository hygiene is not fully clean under review conditions
 
 Location:
-[.github/workflows/documentation-sync.yml](.github/workflows/documentation-sync.yml), [src/doc_sync/cli.py](src/doc_sync/cli.py)
+Repository root and working tree
 
 Evidence:
-The workflow and CLI are connected directly, but the runtime is not explicit enough about malformed GitHub payloads, workflow API failures, and branch-state mismatches.
+The diff and git status still show modified project files from the review and repair cycle, and the repository state is not fully trusted as an isolated release state.
 
 Requirement/Architecture Reference:
-FR-011, NFR-004
+FR-010, NFR-006, NFR-007.
 
 Problem:
-Operational handling around event data and workflow failures is still not robustly modeled.
+The working tree is not a clean audit record at the time of review.
 
 Impact:
-The system is harder to reason about under real GitHub runtime conditions.
+This weakens reviewability and makes evidence collection less reliable.
 
 Recommended Fix:
-Tighten the workflow-to-runtime boundary and make malformed or partial event data fail clearly.
+Clean transient output, isolate review artifacts, and verify the final tree state before final verification.
 
 Verification:
-Confirmed by direct inspection of [.github/workflows/documentation-sync.yml](.github/workflows/documentation-sync.yml) and [src/doc_sync/cli.py](src/doc_sync/cli.py).
+Confirmed by git status output during the review window.
+
+## Informational Findings
+
+- The GitHub-only design direction is coherent and consistent with the project scope.
+- The module boundaries are sensible and largely align with the approved architecture.
+- The project is closer to a workable design than the initial stub, but it is still not production-ready.
 
 ## Requirements Review
 
 ### FR-001..FR-015
 
-- FR-001: PARTIAL — workflow triggers exist, but the runtime still does not fully model the PR-state engine.
-- FR-002: VERIFIED — the project remains GitHub-only by design.
-- FR-003: PARTIAL — change detection is present but still lightweight.
-- FR-004: PARTIAL — scope control exists, but not enough to prove robust supported-doc behavior.
-- FR-005: PARTIAL — commit flow exists, but the final stale-head gate is still missing.
-- FR-006: PARTIAL — commit/footer flow is present but not proven in a live PR-checkout context.
-- FR-007: PARTIAL — validation improved but still not the full required contract.
-- FR-008: FAILED — approval enforcement is not based on real GitHub review state.
-- FR-009: PARTIAL — failure paths exist, but the operational contract is incomplete.
-- FR-010: PARTIAL — artifact/logging model exists but is still not a complete production artifact schema.
-- FR-011: VERIFIED — workflow permissions and triggers are broadly aligned with the requirement.
-- FR-012: FAILED — AI boundary is not a real external provider call with controlled retry semantics.
-- FR-013: PARTIAL — redaction exists, but it is not proven fail-closed across all required cases.
-- FR-014: PARTIAL — tests are stronger but still not sufficient to validate the real runtime contract.
-- FR-015: PARTIAL — runtime time limits are present, but stage-level enforcement is not fully proved.
+- FR-001: PARTIAL — triggers exist, but the runtime still does not prove the full PR-state processing contract.
+- FR-002: VERIFIED — GitHub-only scope is present and consistent.
+- FR-003: PARTIAL — change detection is present but limited in real-world semantics.
+- FR-004: PARTIAL — doc targeting is constrained, but not fully proven for all supported doc types.
+- FR-005: PARTIAL — commit flow exists, but stale-head and final commit proof are not complete.
+- FR-006: PARTIAL — footer is part of the logic, but not proven across all failure states.
+- FR-007: PARTIAL — validation exists, but it is not strong enough to prove safety for semantic drift.
+- FR-008: FAILED — live GitHub approval enforcement is not proven.
+- FR-009: PARTIAL — failure reporting is present in principle, but not fully operationally complete.
+- FR-010: PARTIAL — logs and artifact metadata exist, but the artifact contract is not fully defined.
+- FR-011: VERIFIED — minimal permission model exists in the workflow.
+- FR-012: PARTIAL — retry semantics are partly modeled, but not fully bounded to transient errors only.
+- FR-013: PARTIAL — redaction is modeled, but fail-closed behavior is not completely proven.
+- FR-014: PARTIAL — tests exist, but they do not validate the key GitHub runtime scenarios.
+- FR-015: PARTIAL — timeout is present, but stage-by-stage runtime budgets are not proven.
 
 ## NFR Review
 
 ### NFR-001..NFR-008
 
-- NFR-001: PARTIAL — redaction is better, but not proven fail-closed for all relevant patterns.
-- NFR-002: PARTIAL — stale-head logic exists conceptually, but the final hard gate is still missing.
-- NFR-003: PARTIAL — a timeout exists, but budget granularity and stage enforcement are not proven.
-- NFR-004: VERIFIED — modular structure is a clear strength.
-- NFR-005: PARTIAL — tests are better but still insufficient as proof of production correctness.
-- NFR-006: PARTIAL — logs and artifacts are present but not complete enough for auditability.
-- NFR-007: PARTIAL — private retention and safe artifact handling remain not fully proven.
-- NFR-008: FAILED — the AI boundary remains a stub and is not a trusted, real provider contract.
+- NFR-001 Security: PARTIAL — better secret handling exists, but the live safety boundary is not fully proven.
+- NFR-002 Reliability: PARTIAL — idempotency exists conceptually, but the final stale-head gate is not proven.
+- NFR-003 Performance: PARTIAL — timeout exists, but not enough evidence for stage-level enforcement.
+- NFR-004 Maintainability: VERIFIED — the code is modular and understandable.
+- NFR-005 Testability: PARTIAL — tests are useful but insufficient for the production security contract.
+- NFR-006 Observability: PARTIAL — logs and artifacts exist, but the schema and reporting flow are not complete enough.
+- NFR-007 Privacy: PARTIAL — artifact handling is better than earlier, but not fully reviewed as a hardened contract.
+- NFR-008 AI Safety: PARTIAL — AI boundary remains weaker than the architecture requires.
 
 ## Design Review Resolution Check
 
 ### DR-001..DR-008
 
-- DR-001: PARTIAL — stale-head logic is present but not final pre-commit proof.
-- DR-002: FAILED — approval semantics are still metadata-driven rather than native GitHub enforcement.
-- DR-003: PARTIAL — file-scope and prompt-injection checks are shallow.
-- DR-004: PARTIAL — structural validation still does not prove semantic drift control.
-- DR-005: PARTIAL — redaction is improved but not fully fail-closed.
-- DR-006: PARTIAL — runtime budget enforcement is not fully demonstrated.
-- DR-007: PARTIAL — dedupe and concurrency protection are conceptually present but not proven in a branch-churn scenario.
-- DR-008: PARTIAL — artifact schema remains placeholder-level.
+- DR-001 stale PR HEAD: PARTIAL — still not proven as a final hard stop immediately before commit.
+- DR-002 approval enforcement: FAILED — still metadata-driven rather than live GitHub review enforcement.
+- DR-003 prompt injection and file scope: PARTIAL — improved but not yet fully hardened.
+- DR-004 semantic/documentation drift: PARTIAL — validation insufficient for semantic proof.
+- DR-005 secret redaction: PARTIAL — redaction is better but still not demonstrated as fail-closed across all cases.
+- DR-006 runtime limits: PARTIAL — timeout exists but stage-level enforcement is not established.
+- DR-007 processing identity and idempotency: PARTIAL — conceptually present but not proved in real concurrency conditions.
+- DR-008 artifact schema: PARTIAL — artifact metadata exists, but the full production schema is not proven.
 
 ## Security Review
 
-The implementation is still not production-safe from a security perspective.
+The project is not yet safe enough for production-phase verification.
 
-- approval is not enforced through live GitHub review state
-- the AI generator is not a real external provider boundary
-- redaction is improved but not fully proven fail-closed
-- the runtime still does not prove branch-state integrity before a commit
+- The approval gate is not based on live GitHub review state.
+- The AI generation path still has fallback behavior that can bypass a strict provider requirement.
+- The workflow remains dependent on local metadata rather than GitHub-native branch-authorization state.
+- Stale-head protection is not proven at the final commit boundary.
+
+## AI Safety Review
+
+The AI layer is still not fully hardened.
+
+- It is treated as untrusted candidate output in theory, but the actual runtime is still permissive when strict provider auth metadata is absent.
+- The implementation still does not prove a real fail-closed provider boundary.
+- The path-scope gate is present, but it is not enough to guarantee safe execution against untrusted repo content.
+
+## Idempotency Review
+
+The implementation includes a deterministic fingerprint concept and a stale-run detector, but it does not fully prove real idempotent behavior under a moving PR head or repeated execution. The final state requires a hard live-head comparison immediately before commit, which is still not fully demonstrated.
+
+## Stale-Head Review
+
+The architecture requires the exact sequence: capture head, analyze, generate, validate, dedupe, re-fetch live head, compare, then commit. The code does not provide enough proof that the final re-fetch happens just before commit in a way that guarantees no stale-run commit. This is still a material risk.
+
+## Atomic Commit Review
+
+The commit logic is disciplined in how it stages and validates selected files, but the overall safety of the commit path depends on the missing live-head and approval checks. Without those proven gates, atomic commit safety is not yet established for production use.
+
+## Validation Review
+
+Validation is an improvement over the placeholder state, but it remains narrower than the architecture and requirements require. It is not yet strong enough to prove semantic correctness or robust structural congruence for API-driven documentation changes.
+
+## GitHub Workflow Review
+
+The workflow is a good local scaffold and matches the GitHub Action shape, but it does not prove the required live GitHub approval and stale-head enforcement. It should be treated as scaffolding, not final evidence of production readiness.
+
+## CODEOWNERS Review
+
+The repository has a CODEOWNERS file, but there is no proof that the workflow actually checks the live CODEOWNERS state on the current PR head. This means the approval boundary remains unproven in the production runtime.
+
+## Test Quality Review
+
+The tests are useful for unit-level checks, but they do not generate adequate evidence for the critical GitHub-native safety boundaries. A passing suite does not compensate for the absence of a proven live approval check or final stale-head abort path.
+
+## Error Handling Review
+
+The code has structured error paths, but the project still does not have a complete fail-closed model for provider, approval, stale-head, and malformed-input conditions. The system still benefits from more rigorous failure classification before Phase 8.
+
+## Performance Review
+
+The implementation includes a 10-minute workflow timeout, but the review did not find enough evidence that each phase enforces a proper bounded budget. This is acceptable as a start, but it is not production-grade proof.
+
+## Maintainability Review
+
+The code structure remains modular and manageable overall. Maintainability is a strength. The limiting factor is not code organization but the absence of proven production safety enforcement.
+
+## Repository Hygiene
+
+The repository state is not fully clean under review conditions, and it is not an ideal release-quality evidence state. This is not a security breach by itself, but it is a reviewability concern and weakens confidence in the final proof record.
+
+## Required Actions
+
+1. Replace metadata-only approval logic with live GitHub review-state enforcement.
+2. Re-fetch the live PR head immediately before commit and fail closed on any difference.
+3. Remove or hard-disable silent AI fallback when provider auth is absent.
+4. Strengthen semantic validation so the generated docs are proven to match the changed API contract.
+5. Add workflow-level tests for live approval, stale-head rejection, and provider failure behavior.
+6. Clean the repo state and ensure the final review artifact reflects a trusted state.
+
+## Final Review Decision
+BLOCKED- the runtime still does not prove branch-state integrity before a commit
 
 ## AI Safety Review
 

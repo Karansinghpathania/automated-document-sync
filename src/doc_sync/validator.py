@@ -39,9 +39,11 @@ def _validate_openapi(path: str, content: str) -> list[str]:
 
 def run_validators(phase: str, pr_context: PRContext, corpus: dict[str, str], impacted_docs: list[str]) -> ValidationResult:
     """Run deterministic documentation validation for the current phase."""
+    checks: list[dict[str, object]] = []
     errors: list[str] = []
     warnings: list[str] = []
     limitations: list[str] = []
+    files_checked: list[str] = []
 
     if not corpus:
         return ValidationResult(
@@ -51,6 +53,10 @@ def run_validators(phase: str, pr_context: PRContext, corpus: dict[str, str], im
             warnings=['No documentation content was generated; validation considered a no-op.'],
             deterministic=True,
             limitations=['No content to validate.'],
+            checks=[{'name': 'empty_corpus', 'passed': True, 'file': 'n/a', 'message': 'No content was available for validation.'}],
+            files_checked=[],
+            blocking=False,
+            human_review_required=True,
         )
 
     metadata = pr_context.metadata or {}
@@ -58,24 +64,41 @@ def run_validators(phase: str, pr_context: PRContext, corpus: dict[str, str], im
     documented_summary = metadata.get('documented_api_summary')
     if changed_summary is not None and documented_summary is not None:
         if str(changed_summary).strip() and str(documented_summary).strip() and str(changed_summary).strip() != str(documented_summary).strip():
-            errors.append('Structural mismatch: the documented API summary does not match the changed API summary.')
+            mismatch = 'Structural mismatch: the documented API summary does not match the changed API summary.'
+            errors.append(mismatch)
+            checks.append({'name': 'api_contract_mismatch', 'passed': False, 'file': 'api-contract', 'message': mismatch})
+        else:
+            checks.append({'name': 'api_contract_mismatch', 'passed': True, 'file': 'api-contract', 'message': 'Documented API summary matches the changed API summary.'})
 
-    corpus_paths = {path.strip().replace('\\', '/') for path in corpus if str(path).strip()}
+    corpus_paths = {str(path).strip().replace('\\', '/') for path in corpus if str(path).strip()}
     for path, content in corpus.items():
         if not str(path).strip():
             errors.append('Document path cannot be empty.')
+            checks.append({'name': 'path_validation', 'passed': False, 'file': 'n/a', 'message': 'Document path cannot be empty.'})
             continue
         normalized = str(path).strip().replace('\\', '/')
+        files_checked.append(normalized)
         text = str(content or '')
 
         if normalized.endswith('.md'):
             if not text.strip():
-                errors.append(f'{normalized} is empty.')
+                message = f'{normalized} is empty.'
+                errors.append(message)
+                checks.append({'name': 'markdown_content', 'passed': False, 'file': normalized, 'message': message})
                 continue
+            checks.append({'name': 'markdown_content', 'passed': True, 'file': normalized, 'message': 'Markdown content is non-empty.'})
             if '```' in text and text.count('```') % 2 != 0:
-                errors.append(f'{normalized} has an unmatched fenced code block.')
+                message = f'{normalized} has an unmatched fenced code block.'
+                errors.append(message)
+                checks.append({'name': 'markdown_fence_validation', 'passed': False, 'file': normalized, 'message': message})
+            else:
+                checks.append({'name': 'markdown_fence_validation', 'passed': True, 'file': normalized, 'message': 'Fenced code blocks are balanced.'})
             if normalized in impacted_docs and '# ' not in text and '## ' not in text:
-                warnings.append(f'{normalized} has no heading markers; manual review may still be required.')
+                message = f'{normalized} must include a markdown heading before it can be accepted.'
+                errors.append(message)
+                checks.append({'name': 'markdown_heading_validation', 'passed': False, 'file': normalized, 'message': message})
+            else:
+                checks.append({'name': 'markdown_heading_validation', 'passed': True, 'file': normalized, 'message': 'Markdown heading structure is acceptable.'})
             for target in _relative_link_targets(text):
                 if target.startswith(('http://', 'https://', 'mailto:')):
                     continue
@@ -83,15 +106,27 @@ def run_validators(phase: str, pr_context: PRContext, corpus: dict[str, str], im
                 if not candidate:
                     continue
                 if candidate.startswith('/'):
-                    errors.append(f'{normalized} contains an absolute-relative link that is not allowed: {candidate}')
+                    message = f'{normalized} contains an absolute-relative link that is not allowed: {candidate}'
+                    errors.append(message)
+                    checks.append({'name': 'relative_link_validation', 'passed': False, 'file': normalized, 'message': message})
                     continue
                 resolved = ((normalized.rsplit('/', 1)[0] + '/' + candidate) if '/' in normalized else candidate).replace('\\', '/').replace('//', '/')
                 if candidate.startswith('../'):
                     resolved = candidate
                 if resolved not in corpus_paths and not any(candidate == doc for doc in corpus_paths):
-                    errors.append(f'{normalized} links to a missing documentation file: {candidate}')
+                    message = f'{normalized} links to a missing documentation file: {candidate}'
+                    errors.append(message)
+                    checks.append({'name': 'relative_link_validation', 'passed': False, 'file': normalized, 'message': message})
+                else:
+                    checks.append({'name': 'relative_link_validation', 'passed': True, 'file': normalized, 'message': f'Link target resolved successfully: {candidate}'})
         elif _looks_like_openapi(normalized, text):
-            errors.extend(_validate_openapi(normalized, text))
+            openapi_errors = _validate_openapi(normalized, text)
+            if openapi_errors:
+                errors.extend(openapi_errors)
+                for message in openapi_errors:
+                    checks.append({'name': 'openapi_validation', 'passed': False, 'file': normalized, 'message': message})
+            else:
+                checks.append({'name': 'openapi_validation', 'passed': True, 'file': normalized, 'message': 'OpenAPI document structure is valid.'})
 
     if errors:
         return ValidationResult(
@@ -101,6 +136,10 @@ def run_validators(phase: str, pr_context: PRContext, corpus: dict[str, str], im
             warnings=warnings,
             deterministic=True,
             limitations=limitations,
+            checks=checks,
+            files_checked=sorted(set(files_checked)),
+            blocking=True,
+            human_review_required=False,
         )
 
     if not impacted_docs:
@@ -113,4 +152,8 @@ def run_validators(phase: str, pr_context: PRContext, corpus: dict[str, str], im
         warnings=warnings,
         deterministic=True,
         limitations=limitations,
+        checks=checks,
+        files_checked=sorted(set(files_checked)),
+        blocking=False,
+        human_review_required=True,
     )

@@ -42,6 +42,10 @@ class ValidationResult:
     warnings: list[str] = field(default_factory=list)
     deterministic: bool = True
     limitations: list[str] = field(default_factory=list)
+    checks: list[dict[str, Any]] = field(default_factory=list)
+    files_checked: list[str] = field(default_factory=list)
+    blocking: bool = False
+    human_review_required: bool = True
 
 
 @dataclass(frozen=True)
@@ -134,6 +138,8 @@ class ApprovalStatus:
     review_required: bool
     review_valid: bool
     current_pr_state_matches_review: bool
+    reviewer: str = ""
+    review_head_sha: str = ""
     reason: str = ""
 
 

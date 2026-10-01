@@ -14,15 +14,16 @@ VERIFIED
 
 ## Implementation Summary
 
-The safety-critical issues identified in review have been repaired and the project is back in a verified state.
+The review-blocking issues have been repaired and the pipeline now fails closed when approval metadata is missing, rejects stale heads before commit, prevents raw repository content from passing through the AI boundary, and records deterministic workflow state in the artifact bundle.
 
 Implemented and repaired areas include:
 
 - fail-closed GitHub approval semantics in [src/doc_sync/github_client.py](src/doc_sync/github_client.py)
-- non-pass-through AI generation boundary in [src/doc_sync/generator.py](src/doc_sync/generator.py)
-- stale-head rejection before commit in [src/doc_sync/committer.py](src/doc_sync/committer.py)
-- approval-aware local execution flow in [src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py)
-- deterministic regression coverage in [tests/test_implementation_core.py](tests/test_implementation_core.py)
+- strict provider-auth enforcement and explicit fallback opt-in in [src/doc_sync/generator.py](src/doc_sync/generator.py)
+- stale-head protection and approved-path enforcement in [src/doc_sync/committer.py](src/doc_sync/committer.py)
+- approval-aware orchestration flow in [src/doc_sync/orchestrator.py](src/doc_sync/orchestrator.py)
+- stronger deterministic validation and artifact reporting in [src/doc_sync/validator.py](src/doc_sync/validator.py) and [src/doc_sync/artifacts.py](src/doc_sync/artifacts.py)
+- regression coverage in [tests/test_implementation_core.py](tests/test_implementation_core.py), [tests/test_synchronizer.py](tests/test_synchronizer.py), and [tests/test_production_hardening.py](tests/test_production_hardening.py)
 
 ## Test Execution
 
@@ -30,7 +31,7 @@ Command run:
 `pytest -q`
 
 Result:
-`22 passed in 2.04s`
+`30 passed in 2.70s`
 
 Additional hygiene check:
 `git diff --check`

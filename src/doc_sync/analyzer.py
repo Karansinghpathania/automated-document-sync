@@ -1,29 +1,36 @@
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence, cast
 
 from .detector import classify_path
 from .models import ChangedFile, ImpactAnalysis
 
 
-def analyze_impact(changed_files: Sequence[Mapping[str, object]] | Iterable[Mapping[str, object]], repo_state: Mapping[str, object] | None = None) -> ImpactAnalysis:
+def analyze_impact(
+    changed_files: Sequence[ChangedFile | Mapping[str, object]] | Iterable[ChangedFile | Mapping[str, object]],
+    repo_state: Mapping[str, object] | None = None,
+) -> ImpactAnalysis:
     """Map code/API changes to a safe documentation scope."""
-    repo_state = repo_state or {}
-    docs_index = set(str(item) for item in repo_state.get('docs', []))
-    source_index = set(str(item) for item in repo_state.get('source', []))
+    state = dict(repo_state or {})
+    docs_values = cast(Sequence[Any], state.get('docs', []))
+    source_values = cast(Sequence[Any], state.get('source', []))
+    docs_index = set(str(item) for item in docs_values)
+    source_index = set(str(item) for item in source_values)
 
     normalized: list[ChangedFile] = []
     for entry in changed_files:
         if isinstance(entry, ChangedFile):
             normalized.append(entry)
             continue
+        mapping = cast(Mapping[str, object], entry)
+        relative_path = str(mapping.get('path') or mapping.get('file') or '')
         normalized.append(
             ChangedFile(
-                path=str(entry.get('path') or entry.get('file') or ''),
-                status=str(entry.get('status') or 'modified'),
-                content=str(entry.get('content') or ''),
-                diff_hunk=str(entry.get('diff_hunk') or ''),
-                kind=classify_path(str(entry.get('path') or entry.get('file') or '')),
+                path=relative_path,
+                status=str(mapping.get('status') or 'modified'),
+                content=str(mapping.get('content') or ''),
+                diff_hunk=str(mapping.get('diff_hunk') or ''),
+                kind=classify_path(relative_path),
             )
         )
 

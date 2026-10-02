@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull request number for manual verification. Required for workflow_dispatch.'
+        required: true
+        type: number
 
 permissions:
   contents: write
@@ -36,17 +41,20 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          OPENAI_API_KEY: ""
         run: |
           python -m pytest -q
 
       - name: Run documentation sync orchestration
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || 0 }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name || github.repository }}
         run: |
-          python -m doc_sync.cli --event "${{ github.event_name }}" --repo "${GITHUB_REPOSITORY}" --head-sha "${PR_HEAD_SHA}" --base-sha "${PR_BASE_SHA}" --workflow-run-id "${WORKFLOW_RUN_ID}" --token "${GITHUB_TOKEN}"
+          python -m doc_sync.cli --event "${{ github.event_name }}" --repo "${GITHUB_REPOSITORY}" --pr-number "${PR_NUMBER}" --head-sha "${PR_HEAD_SHA}" --base-sha "${PR_BASE_SHA}" --workflow-run-id "${WORKFLOW_RUN_ID}" --token "${GITHUB_TOKEN}"

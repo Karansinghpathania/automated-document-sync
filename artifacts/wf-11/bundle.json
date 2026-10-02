@@ -1,0 +1,39 @@
+{
+  "ai": {
+    "attempts": 1,
+    "provider": "openai",
+    "retry_reason": null
+  },
+  "approval": {
+    "head_sha": "sha-2",
+    "reviewer": null,
+    "status": "unknown"
+  },
+  "captured_head_sha": "sha-2",
+  "commit": {
+    "created": true,
+    "sha": null
+  },
+  "completed_at": null,
+  "documents_changed": [
+    "README.md"
+  ],
+  "duration_seconds": 1,
+  "failure": null,
+  "files_analyzed": [
+    "src/api.py"
+  ],
+  "final_head_sha": "sha-2",
+  "processing_identity": "pr-11:sha-2",
+  "pull_request": 11,
+  "repository": "unknown/repository",
+  "result": "success",
+  "stale_reason": null,
+  "started_at": null,
+  "validation": {
+    "checks": [],
+    "human_review_required": true,
+    "status": "pass"
+  },
+  "workflow_run_id": "wf-11"
+}

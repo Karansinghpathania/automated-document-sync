@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+import os
+import subprocess
+from typing import Any, Mapping
 
 from .analyzer import analyze_impact
 from .artifacts import publish_artifact
@@ -13,6 +15,26 @@ from .logging import emit_log
 from .models import ArtifactBundle, CommitPlan, GenerationRequest, PRContext
 from .redactor import redact_corpus
 from .validator import run_validators
+
+
+def _resolve_live_head(pr_context: PRContext) -> str:
+    candidate = str(
+        pr_context.metadata.get('live_head_sha')
+        or pr_context.metadata.get('current_head_sha')
+        or pr_context.metadata.get('repo_head_sha')
+        or ''
+    ).strip()
+    if candidate:
+        return candidate
+    repo_root = pr_context.metadata.get('repo_path')
+    if repo_root:
+        try:
+            result = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=repo_root, capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            return ''
+    return ''
 
 
 def run_documentation_sync(
@@ -38,7 +60,17 @@ def run_documentation_sync(
             'check': set_check_status('success', 'No documentation update needed for this PR.', 'n/a'),
         }
 
-    impact = analyze_impact(detected, repo_state)
+    normalized_detected = [
+        item if isinstance(item, Mapping) else {
+            'path': item.path,
+            'status': item.status,
+            'content': item.content,
+            'diff_hunk': item.diff_hunk,
+            'kind': item.kind,
+        }
+        for item in detected
+    ]
+    impact = analyze_impact(normalized_detected, repo_state)
     if not impact.requires_generation and not impact.allowed_doc_paths:
         return {
             'status': 'no_op',
@@ -70,7 +102,20 @@ def run_documentation_sync(
             'check': set_check_status('failure', 'Pre-generation validation failed.', 'n/a'),
         }
 
-    processing_identity = compute_processing_identity(pr_context, impact.allowed_doc_paths, detected)
+    processing_identity = compute_processing_identity(
+        pr_context,
+        impact.allowed_doc_paths,
+        [
+            {
+                'path': item.path,
+                'status': item.status,
+                'content': item.content,
+                'diff_hunk': item.diff_hunk,
+                'kind': item.kind,
+            }
+            for item in detected
+        ],
+    )
     if resolve_existing_successful_processing(pr_context, processing_identity):
         return {
             'status': 'skipped',
@@ -80,8 +125,8 @@ def run_documentation_sync(
             'check': set_check_status('success', 'Documentation already processed for this PR state.', 'n/a'),
         }
 
-    current_head_sha = str(pr_context.metadata.get('live_head_sha') or pr_context.metadata.get('current_head_sha') or pr_context.head_sha)
-    if is_stale_run(current_head_sha, pr_context.head_sha):
+    current_head_sha = _resolve_live_head(pr_context)
+    if current_head_sha and is_stale_run(current_head_sha, pr_context.head_sha):
         return {
             'status': 'fail',
             'stage': 'stale_head',
@@ -96,6 +141,24 @@ def run_documentation_sync(
             'stage': 'approval',
             'approval': approval,
             'check': set_check_status('failure', 'Required GitHub review is not valid for the current PR state.', 'n/a'),
+        }
+
+    provider_key = str(pr_context.metadata.get('openai_api_key') or os.environ.get('OPENAI_API_KEY') or '').strip()
+    if not provider_key and bool(pr_context.metadata.get('require_provider_auth', False)):
+        return {
+            'status': 'fail',
+            'stage': 'provider_auth',
+            'processing_identity': processing_identity,
+            'approval': approval,
+            'check': set_check_status('failure', 'Provider authentication is required for generation and is missing.', 'n/a'),
+        }
+    if not provider_key and not bool(pr_context.metadata.get('allow_synthetic_fallback', False)):
+        return {
+            'status': 'fail',
+            'stage': 'provider_auth',
+            'processing_identity': processing_identity,
+            'approval': approval,
+            'check': set_check_status('failure', 'Provider authentication is required for generation and is missing.', 'n/a'),
         }
 
     generation_request = GenerationRequest(
@@ -116,6 +179,15 @@ def run_documentation_sync(
             'validation': post_validation,
             'generated_docs': generated_docs,
             'check': set_check_status('failure', 'Post-generation validation failed.', 'n/a'),
+        }
+
+    current_head_sha = _resolve_live_head(pr_context)
+    if current_head_sha and is_stale_run(current_head_sha, pr_context.head_sha):
+        return {
+            'status': 'fail',
+            'stage': 'stale_head',
+            'processing_identity': processing_identity,
+            'check': set_check_status('failure', 'PR head changed after generation; stale run aborted before commit.', 'n/a'),
         }
 
     commit_plan = CommitPlan(

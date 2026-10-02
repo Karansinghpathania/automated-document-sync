@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Mapping
 
 
@@ -42,6 +42,10 @@ class ValidationResult:
     warnings: list[str] = field(default_factory=list)
     deterministic: bool = True
     limitations: list[str] = field(default_factory=list)
+    checks: list[dict[str, Any]] = field(default_factory=list)
+    files_checked: list[str] = field(default_factory=list)
+    blocking: bool = False
+    human_review_required: bool = True
 
 
 @dataclass(frozen=True)
@@ -134,6 +138,8 @@ class ApprovalStatus:
     review_required: bool
     review_valid: bool
     current_pr_state_matches_review: bool
+    reviewer: str = ""
+    review_head_sha: str = ""
     reason: str = ""
 
 
@@ -142,4 +148,16 @@ def canonicalize(value: Mapping[str, Any] | Any) -> str:
         return str(dict(sorted(value.items())))
     if isinstance(value, (list, tuple, set)):
         return str(sorted(str(item) for item in value))
+    return str(value)
+
+
+def to_jsonable(value: Any) -> Any:
+    if is_dataclass(value):
+        return {key: to_jsonable(item) for key, item in asdict(value).items()}
+    if isinstance(value, Mapping):
+        return {str(key): to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [to_jsonable(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
     return str(value)
